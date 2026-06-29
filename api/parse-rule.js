@@ -1,4 +1,4 @@
-// Vercel Serverless Function for parsing natural‑language discount rules
+// Vercel Serverless Function for parsing natural-language discount rules
 // This file lives at the repository root under /api/parse-rule.js
 
 const SYSTEM_PROMPT = `You are a precise JSON generator. Your task is to parse a plain-English discount rule description into a single structured JSON object matching the DiscountRule shape.
@@ -14,7 +14,7 @@ DISCOUNTRULE SHAPE:
 }
 
 RULES:
-1. Return ONLY the raw JSON object. Do NOT include any markdown code fences (like ```json), do NOT include any introductory or concluding text, and do NOT include any other explanation.
+1. Return ONLY the raw JSON object. Do NOT include any markdown code fences (like \`\`\`json), do NOT include any introductory or concluding text, and do NOT include any other explanation.
 2. If the input is ambiguous, missing a value, or missing a threshold (for cart rules), return an object with an error field:
    { "error": "unresolvable", "message": "Reason why it is unresolvable" }.
 3. Do NOT guess default values if they are missing and critical (e.g. if no value is specified, or no threshold is specified for a cart rule).
@@ -33,21 +33,32 @@ Input: "Give a discount for big orders"
 Output: {"error": "unresolvable", "message": "Missing discount value and cart value threshold."}`;
 
 export default async function handler(req, res) {
+  // Set CORS headers for production
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const { text } = req.body || {};
-  if (!text) {
-    return res.status(400).json({ error: 'Missing `text` in request body' });
-  }
-
-  const apiKey = process.env.GROQ_API_KEY;
-  if (!apiKey) {
-    return res.status(500).json({ error: 'GROQ_API_KEY is not configured on the server. Please add it to your environment variables.' });
-  }
-
   try {
+    const { text } = req.body || {};
+    if (!text) {
+      return res.status(400).json({ error: 'Missing `text` in request body' });
+    }
+
+    const apiKey = process.env.GROQ_API_KEY;
+    if (!apiKey) {
+      return res.status(500).json({
+        error: 'GROQ_API_KEY is not configured on the server. Add it in your Vercel project Settings → Environment Variables.'
+      });
+    }
+
     const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -66,11 +77,15 @@ export default async function handler(req, res) {
 
     const data = await response.json();
     if (!response.ok) {
-      return res.status(response.status).json({ error: data.error?.message || 'Groq API error' });
+      console.error('Groq API error:', JSON.stringify(data));
+      return res.status(response.status).json({
+        error: data.error?.message || 'Groq API returned an error'
+      });
     }
 
     return res.status(200).json({ result: data.choices[0].message.content.trim() });
   } catch (err) {
-    return res.status(500).json({ error: err.message });
+    console.error('parse-rule handler error:', err);
+    return res.status(500).json({ error: err.message || 'Internal server error' });
   }
 }

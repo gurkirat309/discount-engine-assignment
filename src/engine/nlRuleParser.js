@@ -20,7 +20,19 @@ export async function parseRuleWithLLM(text) {
     body: JSON.stringify({ text }),
   })
 
-  const data = await response.json()
+  // Read as text first so we can handle non-JSON responses gracefully
+  const rawText = await response.text()
+
+  let data
+  try {
+    data = JSON.parse(rawText)
+  } catch {
+    // The server returned non-JSON (e.g. Vercel's HTML error page)
+    console.error('Non-JSON response from /api/parse-rule:', rawText.slice(0, 200))
+    throw new Error(
+      'The server returned an unexpected response. Please ensure GROQ_API_KEY is set in your Vercel Environment Variables (Settings → Environment Variables).'
+    )
+  }
 
   if (!response.ok) {
     throw new Error(data.error || 'Failed to parse rule')
