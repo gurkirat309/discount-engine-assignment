@@ -13,6 +13,8 @@ import { parseRulesCSV, parseCartCSV } from './engine/csvParser.js'
 import { processCart, cartTotal } from './engine/discountEngine.js'
 import { applyCartLevelDiscount } from './engine/cartDiscountEngine.js'
 import { parseRuleWithLLM, validateParsedRule } from './engine/nlRuleParser.js'
+import PdfUploader from './components/PdfUploader.jsx'
+import { parseCartPDF } from './engine/pdfCartParser.js'
 
 // ── Column definitions ───────────────────────────────────────────
 
@@ -123,6 +125,12 @@ export default function App() {
   const [parsedRule, setParsedRule] = useState(null)
   const [parseError, setParseError] = useState(null)
 
+  const [pdfItemsPreview, setPdfItemsPreview] = useState(null)
+  const [pdfWarnings, setPdfWarnings]     = useState([])
+  const [pdfFileName, setPdfFileName]     = useState('')
+  const [isParsingPdf, setIsParsingPdf]   = useState(false)
+  const [pdfParseError, setPdfParseError] = useState(null)
+
   // ── Handlers ──
 
   function handleRulesLoad(csvText, fileName) {
@@ -183,6 +191,47 @@ export default function App() {
     setParsedRule(null)
     setParseError(null)
     setNlInput('')
+  }
+
+  async function handlePdfLoad(arrayBuffer, fileName) {
+    setIsParsingPdf(true)
+    setPdfParseError(null)
+    setPdfItemsPreview(null)
+    setPdfWarnings([])
+    setPdfFileName(fileName)
+    try {
+      const { items, warnings } = await parseCartPDF(arrayBuffer)
+      if (items.length === 0) {
+        setPdfParseError('No valid items found in the PDF. Cart was not replaced.')
+      } else {
+        setPdfItemsPreview(items)
+        setPdfWarnings(warnings)
+      }
+    } catch (err) {
+      setPdfParseError(err.message || 'Failed to parse PDF file.')
+    } finally {
+      setIsParsingPdf(false)
+    }
+  }
+
+  function handleConfirmPdfCart() {
+    if (!pdfItemsPreview) return
+    setCartItems(pdfItemsPreview)
+    setCartFileName(pdfFileName)
+    setCartErrors([]) // Clear CSV errors since we're replacing the cart
+    setPdfItemsPreview(null)
+    setPdfWarnings([])
+    setPdfFileName('')
+
+    const res = processCart(pdfItemsPreview, rules)
+    setResults(res)
+  }
+
+  function handleCancelPdfCart() {
+    setPdfItemsPreview(null)
+    setPdfWarnings([])
+    setPdfFileName('')
+    setPdfParseError(null)
   }
 
   const canCalculate = rules.length > 0 && cartItems.length > 0
@@ -346,25 +395,129 @@ export default function App() {
             </div>
           </div>
 
-          {/* Cart upload */}
-          <div style={S.section}>
-            <div style={S.sectionTitle}>Cart Items</div>
-            <CsvUploader
-              label="cart.csv"
-              description="Upload your cart CSV"
-              onLoad={handleCartLoad}
-              hasData={cartItems.length > 0}
-              fileName={cartFileName}
-            />
-            <ErrorBanner errors={cartErrors} />
-            {cartItems.length > 0 && (
-              <div style={{ marginTop: '0.75rem' }}>
-                <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>
-                  {cartItems.length} item{cartItems.length > 1 ? 's' : ''} loaded
+          {/* Right Column: Cart upload */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+            {/* Cart upload */}
+            <div style={S.section}>
+              <div style={S.sectionTitle}>Cart Items</div>
+              <CsvUploader
+                label="cart.csv"
+                description="Upload your cart CSV"
+                onLoad={handleCartLoad}
+                hasData={cartItems.length > 0}
+                fileName={cartFileName}
+              />
+              <ErrorBanner errors={cartErrors} />
+              {cartItems.length > 0 && (
+                <div style={{ marginTop: '0.75rem' }}>
+                  <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>
+                    {cartItems.length} item{cartItems.length > 1 ? 's' : ''} loaded
+                  </div>
+                  <DataTable columns={CART_COLUMNS} rows={cartItems} />
                 </div>
-                <DataTable columns={CART_COLUMNS} rows={cartItems} />
+              )}
+            </div>
+
+            {/* PDF Cart Upload */}
+            <div style={S.section}>
+              <div style={S.sectionTitle}>Upload Cart PDF</div>
+              <div style={{ fontSize: 12, color: '#666', marginBottom: '0.6rem' }}>
+                Upload a PDF invoice or order table to replace the cart items.
               </div>
-            )}
+              <PdfUploader
+                label="cart.pdf"
+                description="Upload your cart PDF"
+                onLoad={handlePdfLoad}
+                hasData={pdfItemsPreview !== null}
+                fileName={pdfFileName}
+              />
+              {isParsingPdf && (
+                <div style={{ fontSize: 12, color: '#888', marginTop: 8 }}>
+                  Parsing PDF...
+                </div>
+              )}
+              {pdfParseError && (
+                <div style={{
+                  marginTop: '0.8rem',
+                  padding: '0.6rem 0.8rem',
+                  background: '#fde8e8',
+                  color: '#9b1c1c',
+                  borderRadius: 4,
+                  fontSize: 12,
+                  borderLeft: '4px solid #f05252'
+                }}>
+                  {pdfParseError}
+                </div>
+              )}
+
+              {pdfWarnings.length > 0 && (
+                <div style={{
+                  marginTop: '0.8rem',
+                  padding: '0.6rem 0.8rem',
+                  background: '#fef3c7',
+                  color: '#92400e',
+                  borderRadius: 4,
+                  fontSize: 12,
+                  borderLeft: '4px solid #f59e0b'
+                }}>
+                  <div style={{ fontWeight: 700, marginBottom: 4 }}>Warnings:</div>
+                  <ul style={{ margin: 0, paddingLeft: '1.2rem' }}>
+                    {pdfWarnings.map((w, idx) => (
+                      <li key={idx}>{w}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {pdfItemsPreview && (
+                <div style={{
+                  marginTop: '0.8rem',
+                  padding: '0.8rem',
+                  background: '#f3faf7',
+                  border: '1px solid #def7ec',
+                  borderRadius: 6,
+                }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: '#03543f', textTransform: 'uppercase', marginBottom: '0.4rem' }}>
+                    Extracted Cart Items Preview ({pdfItemsPreview.length} items)
+                  </div>
+                  <div style={{ maxHeight: '150px', overflowY: 'auto', marginBottom: '0.8rem', border: '1px solid #e5e7eb', borderRadius: 4 }}>
+                    <DataTable columns={CART_COLUMNS} rows={pdfItemsPreview} />
+                  </div>
+                  <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    <button
+                      style={{
+                        background: '#0e9f6e',
+                        color: '#fff',
+                        border: 'none',
+                        borderRadius: 4,
+                        padding: '0.4rem 1rem',
+                        fontSize: 12,
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                      }}
+                      onClick={handleConfirmPdfCart}
+                    >
+                      Replace Cart & Recalculate
+                    </button>
+                    <button
+                      style={{
+                        background: '#f05252',
+                        color: '#fff',
+                        border: 'none',
+                        borderRadius: 4,
+                        padding: '0.4rem 1rem',
+                        fontSize: 12,
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                      }}
+                      onClick={handleCancelPdfCart}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
