@@ -11,6 +11,8 @@ import DataTable from './components/DataTable.jsx'
 import ErrorBanner from './components/ErrorBanner.jsx'
 import { parseRulesCSV, parseCartCSV } from './engine/csvParser.js'
 import { processCart, cartTotal } from './engine/discountEngine.js'
+import { applyCartLevelDiscount } from './engine/cartDiscountEngine.js'
+import { parseRuleWithLLM, validateParsedRule } from './engine/nlRuleParser.js'
 
 // ── Column definitions ───────────────────────────────────────────
 
@@ -25,6 +27,7 @@ const RULES_COLUMNS = [
     render: (v, row) => row.type === 'percentage' ? `${v}% off` : `Rs.${v} off`,
   },
   { key: 'stackable', label: 'Stackable',  render: (v) => (v ? 'Yes' : 'No') },
+  { key: 'minCartValue', label: 'Min Cart Value', render: (v) => v ? `Rs.${v.toLocaleString('en-IN')}` : '—' },
 ]
 
 const CART_COLUMNS = [
@@ -115,6 +118,11 @@ export default function App() {
 
   const [results, setResults]       = useState(null)
 
+  const [nlInput, setNlInput]       = useState('')
+  const [isParsing, setIsParsing]   = useState(false)
+  const [parsedRule, setParsedRule] = useState(null)
+  const [parseError, setParseError] = useState(null)
+
   // ── Handlers ──
 
   function handleRulesLoad(csvText, fileName) {
@@ -138,6 +146,45 @@ export default function App() {
     setResults(res)
   }
 
+  async function handleParseRule() {
+    if (!nlInput.trim()) return
+    setIsParsing(true)
+    setParseError(null)
+    setParsedRule(null)
+    try {
+      const rawResult = await parseRuleWithLLM(nlInput)
+      const validation = validateParsedRule(rawResult)
+      if (validation.valid) {
+        setParsedRule(validation.rule)
+      } else {
+        setParseError(validation.error || "Couldn't understand this rule — please specify a value and/or threshold")
+      }
+    } catch (err) {
+      setParseError(err.message || 'An error occurred while parsing the rule.')
+    } finally {
+      setIsParsing(false)
+    }
+  }
+
+  function handleConfirmRule() {
+    if (!parsedRule) return
+    const updatedRules = [...rules, parsedRule]
+    setRules(updatedRules)
+    setParsedRule(null)
+    setNlInput('')
+
+    if (results) {
+      const res = processCart(cartItems, updatedRules)
+      setResults(res)
+    }
+  }
+
+  function handleDiscardRule() {
+    setParsedRule(null)
+    setParseError(null)
+    setNlInput('')
+  }
+
   const canCalculate = rules.length > 0 && cartItems.length > 0
 
   // ── Render ──
@@ -154,25 +201,149 @@ export default function App() {
 
         {/* Upload row */}
         <div style={S.grid2}>
-          {/* Rules upload */}
-          <div style={S.section}>
-            <div style={S.sectionTitle}>Discount Rules</div>
-            <CsvUploader
-              label="rules.csv"
-              description="Upload your discount rules CSV"
-              onLoad={handleRulesLoad}
-              hasData={rules.length > 0}
-              fileName={rulesFileName}
-            />
-            <ErrorBanner errors={rulesErrors} />
-            {rules.length > 0 && (
-              <div style={{ marginTop: '0.75rem' }}>
-                <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>
-                  {rules.length} rule{rules.length > 1 ? 's' : ''} loaded
+          {/* Left Column: Rules & NL Input */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+            {/* Rules upload */}
+            <div style={S.section}>
+              <div style={S.sectionTitle}>Discount Rules</div>
+              <CsvUploader
+                label="rules.csv"
+                description="Upload your discount rules CSV"
+                onLoad={handleRulesLoad}
+                hasData={rules.length > 0}
+                fileName={rulesFileName}
+              />
+              <ErrorBanner errors={rulesErrors} />
+              {rules.length > 0 && (
+                <div style={{ marginTop: '0.75rem' }}>
+                  <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>
+                    {rules.length} rule{rules.length > 1 ? 's' : ''} loaded
+                  </div>
+                  <DataTable columns={RULES_COLUMNS} rows={rules} />
                 </div>
-                <DataTable columns={RULES_COLUMNS} rows={rules} />
+              )}
+            </div>
+
+            {/* Natural Language Rule Input */}
+            <div style={S.section}>
+              <div style={S.sectionTitle}>Add Rule via Text</div>
+              <div style={{ fontSize: 12, color: '#666', marginBottom: '0.6rem' }}>
+                Type a plain-English rule (e.g., "20% off for Natura Casa brand, stackable")
               </div>
-            )}
+              <textarea
+                style={{
+                  width: '100%',
+                  height: '60px',
+                  borderRadius: 4,
+                  border: '1px solid #CECECE',
+                  padding: '0.5rem',
+                  fontSize: 13,
+                  fontFamily: 'inherit',
+                  resize: 'vertical',
+                  boxSizing: 'border-box',
+                  marginBottom: '0.6rem'
+                }}
+                placeholder="Type a rule..."
+                value={nlInput}
+                onChange={(e) => setNlInput(e.target.value)}
+                disabled={isParsing}
+              />
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <button
+                  style={nlInput.trim() && !isParsing ? S.btn : S.btnDisabled}
+                  onClick={handleParseRule}
+                  disabled={!nlInput.trim() || isParsing}
+                >
+                  {isParsing ? 'Parsing...' : 'Parse Rule'}
+                </button>
+                {(parsedRule || parseError) && (
+                  <button
+                    style={{
+                      background: '#ccc',
+                      color: '#333',
+                      border: 'none',
+                      borderRadius: 4,
+                      padding: '0.4rem 1rem',
+                      fontSize: 12,
+                      fontWeight: 600,
+                      cursor: 'pointer'
+                    }}
+                    onClick={handleDiscardRule}
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+
+              {parseError && (
+                <div style={{
+                  marginTop: '0.8rem',
+                  padding: '0.6rem 0.8rem',
+                  background: '#fde8e8',
+                  color: '#9b1c1c',
+                  borderRadius: 4,
+                  fontSize: 12,
+                  borderLeft: '4px solid #f05252'
+                }}>
+                  {parseError}
+                </div>
+              )}
+
+              {parsedRule && (
+                <div style={{
+                  marginTop: '0.8rem',
+                  padding: '0.8rem',
+                  background: '#f3faf7',
+                  border: '1px solid #def7ec',
+                  borderRadius: 6,
+                }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: '#03543f', textTransform: 'uppercase', marginBottom: '0.4rem' }}>
+                    Parsed Rule Preview
+                  </div>
+                  <div style={{ fontSize: 13, color: '#1f2937', lineHeight: '1.4', marginBottom: '0.8rem' }}>
+                    <strong>Scope:</strong> {parsedRule.scope.toUpperCase()}
+                    {parsedRule.scope !== 'cart' && <> · <strong>Applies To:</strong> {parsedRule.appliesTo}</>}
+                    <br />
+                    <strong>Type:</strong> {parsedRule.type === 'percentage' ? 'Percentage' : 'Flat'} · <strong>Value:</strong> {parsedRule.type === 'percentage' ? `${parsedRule.value}% off` : `Rs.${parsedRule.value} off`}
+                    <br />
+                    <strong>Stackable:</strong> {parsedRule.stackable ? 'Yes' : 'No'}
+                    {parsedRule.scope === 'cart' && <> · <strong>Min Cart Value:</strong> Rs.{parsedRule.minCartValue.toLocaleString('en-IN')}</>}
+                  </div>
+                  <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    <button
+                      style={{
+                        background: '#0e9f6e',
+                        color: '#fff',
+                        border: 'none',
+                        borderRadius: 4,
+                        padding: '0.4rem 1rem',
+                        fontSize: 12,
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                      }}
+                      onClick={handleConfirmRule}
+                    >
+                      Confirm & Add Rule
+                    </button>
+                    <button
+                      style={{
+                        background: '#f05252',
+                        color: '#fff',
+                        border: 'none',
+                        borderRadius: 4,
+                        padding: '0.4rem 1rem',
+                        fontSize: 12,
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                      }}
+                      onClick={handleDiscardRule}
+                    >
+                      Discard
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Cart upload */}
@@ -214,16 +385,38 @@ export default function App() {
         </div>
 
         {/* Results */}
-        {results && (
-          <div style={S.section}>
-            <div style={S.sectionTitle}>Cart Summary</div>
-            <DataTable columns={RESULTS_COLUMNS} rows={results} />
-            <div style={S.totalRow}>
-              <span style={S.totalLabel}>Cart Total</span>
-              <span style={S.totalValue}>Rs.{cartTotal(results).toLocaleString('en-IN')}</span>
+        {results && (() => {
+          const cartDiscount = applyCartLevelDiscount(results, rules)
+          return (
+            <div style={S.section}>
+              <div style={S.sectionTitle}>Cart Summary</div>
+              <DataTable columns={RESULTS_COLUMNS} rows={results} />
+              <div style={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'flex-end',
+                marginTop: '1rem',
+                gap: '0.5rem'
+              }}>
+                {cartDiscount.cartOfferApplied && (
+                  <>
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '1rem', fontSize: 13, color: '#555' }}>
+                      <span>Subtotal:</span>
+                      <span style={{ fontWeight: 600 }}>Rs.{cartDiscount.cartSubtotal.toLocaleString('en-IN')}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '1rem', fontSize: 13, color: '#1e5c2c', fontWeight: 600 }}>
+                      <span>{cartDiscount.cartOfferLabel}</span>
+                    </div>
+                  </>
+                )}
+                <div style={S.totalRow}>
+                  <span style={S.totalLabel}>Cart Total</span>
+                  <span style={S.totalValue}>Rs.{cartDiscount.finalCartTotal.toLocaleString('en-IN')}</span>
+                </div>
+              </div>
             </div>
-          </div>
-        )}
+          )
+        })()}
 
       </div>
     </div>
