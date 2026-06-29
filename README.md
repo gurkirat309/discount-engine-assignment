@@ -1,11 +1,24 @@
 # Opptra Discount Engine — Optimizing cart‑level discounts with flexible inputs
 
 ## Live Demo
-- **Deployed URL:** [LIVE_URL_HERE]
-- **Loom walkthrough:** [LOOM_URL_HERE]
+- **Deployed URL:** https://discount-engine-assignment-seven.vercel.app/
+
 
 ## Run Locally (3 steps)
 1. ```bash
+   git clone <repo-url> && cd <repo-name> && npm install
+   ```
+2. Create a `.env.local` file with the following line (required only for the Natural‑Language rule input feature):
+   ```
+   GROQ_API_KEY=your_key_here
+   ```
+   _You can obtain a free key from https://console.groq.com/._
+3. Run the Vercel dev server (required for the NL rule parser):
+   ```bash
+   npx vercel dev
+   ```
+   **Note:** The CSV and PDF uploads work with the regular `npm run dev` dev server; the NL rule input needs the Vercel function.
+   
    git clone <repo-url> && cd <repo-name> && npm install
    ```
 2. Create a `.env.local` file with the following line (required only for the Natural‑Language rule input feature):
