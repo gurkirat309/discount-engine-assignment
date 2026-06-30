@@ -2,11 +2,11 @@
 
 ## Live Demo
 - **Deployed URL:** https://discount-engine-assignment-seven.vercel.app/
-
+- **video walkthrough:** https://www.loom.com/share/9cba5f5b0ebf41cea75b109945b97ac2
 
 ## Run Locally (3 steps)
 1. ```bash
-   git clone <repo-url> && cd <repo-name> && npm install
+   git clone https://github.com/gurkirat309/discount-engine-assignment.git && cd discount-engine-assignment && npm install
    ```
 2. Create a `.env` file with the following line (required only for the Natural‑Language rule input feature):
    ```
