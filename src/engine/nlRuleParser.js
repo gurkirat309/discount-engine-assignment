@@ -119,3 +119,56 @@ export function validateParsedRule(ruleText) {
     },
   }
 }
+
+/**
+ * Validates form-edited rule fields against the DiscountRule schema.
+ * Same logic as validateParsedRule, but accepts a structured object
+ * from the editable confirmation form instead of raw LLM JSON text.
+ *
+ * @param {{ scope: string, appliesTo: string, type: string, value: any, stackable: boolean, minCartValue: any }} fields
+ * @returns {{ valid: boolean, rule?: Object, error?: string }}
+ */
+export function validateRuleFields(fields) {
+  const { scope, appliesTo, type, value, stackable, minCartValue } = fields
+
+  if (scope !== 'brand' && scope !== 'platform' && scope !== 'cart') {
+    return { valid: false, error: 'Scope must be "brand", "platform", or "cart".' }
+  }
+
+  if (type !== 'percentage' && type !== 'flat') {
+    return { valid: false, error: 'Type must be "percentage" or "flat".' }
+  }
+
+  const numValue = parseFloat(value)
+  if (isNaN(numValue) || numValue <= 0) {
+    return { valid: false, error: 'Value must be a positive number.' }
+  }
+
+  if (scope !== 'cart' && (!appliesTo || appliesTo.trim() === '')) {
+    return { valid: false, error: `Applies To is required for "${scope}" scope.` }
+  }
+
+  let numMinCart = 0
+  if (scope === 'cart') {
+    if (minCartValue === undefined || minCartValue === '') {
+      return { valid: false, error: 'Min Cart Value is required for cart scope.' }
+    }
+    numMinCart = parseFloat(minCartValue)
+    if (isNaN(numMinCart) || numMinCart <= 0) {
+      return { valid: false, error: 'Min Cart Value must be a positive number.' }
+    }
+  }
+
+  return {
+    valid: true,
+    rule: {
+      ruleId: `RULE-NL-${Date.now().toString().slice(-4)}`,
+      scope,
+      appliesTo: scope === 'cart' ? '' : appliesTo.trim(),
+      type,
+      value: numValue,
+      stackable: !!stackable,
+      minCartValue: scope === 'cart' ? numMinCart : 0,
+    },
+  }
+}

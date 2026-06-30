@@ -12,7 +12,7 @@ import ErrorBanner from './components/ErrorBanner.jsx'
 import { parseRulesCSV, parseCartCSV } from './engine/csvParser.js'
 import { processCart, cartTotal } from './engine/discountEngine.js'
 import { applyCartLevelDiscount } from './engine/cartDiscountEngine.js'
-import { parseRuleWithLLM, validateParsedRule } from './engine/nlRuleParser.js'
+import { parseRuleWithLLM, validateParsedRule, validateRuleFields } from './engine/nlRuleParser.js'
 import PdfUploader from './components/PdfUploader.jsx'
 import { parseCartPDF } from './engine/pdfCartParser.js'
 
@@ -125,6 +125,11 @@ export default function App() {
   const [parsedRule, setParsedRule] = useState(null)
   const [parseError, setParseError] = useState(null)
 
+  // Editable confirmation form state
+  const [editFields, setEditFields]           = useState(null)
+  const [originalParsedRule, setOriginalParsedRule] = useState(null)
+  const [confirmError, setConfirmError]       = useState(null)
+
   const [pdfItemsPreview, setPdfItemsPreview] = useState(null)
   const [pdfWarnings, setPdfWarnings]     = useState([])
   const [pdfFileName, setPdfFileName]     = useState('')
@@ -159,11 +164,23 @@ export default function App() {
     setIsParsing(true)
     setParseError(null)
     setParsedRule(null)
+    setEditFields(null)
+    setOriginalParsedRule(null)
+    setConfirmError(null)
     try {
       const rawResult = await parseRuleWithLLM(nlInput)
       const validation = validateParsedRule(rawResult)
       if (validation.valid) {
         setParsedRule(validation.rule)
+        setOriginalParsedRule({ ...validation.rule })
+        setEditFields({
+          scope: validation.rule.scope,
+          appliesTo: validation.rule.appliesTo,
+          type: validation.rule.type,
+          value: validation.rule.value,
+          stackable: validation.rule.stackable,
+          minCartValue: validation.rule.minCartValue,
+        })
       } else {
         setParseError(validation.error || "Couldn't understand this rule — please specify a value and/or threshold")
       }
@@ -175,10 +192,21 @@ export default function App() {
   }
 
   function handleConfirmRule() {
-    if (!parsedRule) return
-    const updatedRules = [...rules, parsedRule]
+    if (!editFields) return
+    setConfirmError(null)
+
+    const validation = validateRuleFields(editFields)
+    if (!validation.valid) {
+      setConfirmError(validation.error)
+      return
+    }
+
+    const updatedRules = [...rules, validation.rule]
     setRules(updatedRules)
     setParsedRule(null)
+    setEditFields(null)
+    setOriginalParsedRule(null)
+    setConfirmError(null)
     setNlInput('')
 
     if (results) {
@@ -189,8 +217,16 @@ export default function App() {
 
   function handleDiscardRule() {
     setParsedRule(null)
+    setEditFields(null)
+    setOriginalParsedRule(null)
+    setConfirmError(null)
     setParseError(null)
     setNlInput('')
+  }
+
+  function handleEditField(field, value) {
+    setEditFields((prev) => ({ ...prev, [field]: value }))
+    setConfirmError(null) // clear error on edit
   }
 
   async function handlePdfLoad(arrayBuffer, fileName) {
@@ -338,7 +374,7 @@ export default function App() {
                 </div>
               )}
 
-              {parsedRule && (
+              {editFields && (
                 <div style={{
                   marginTop: '0.8rem',
                   padding: '0.8rem',
@@ -347,17 +383,118 @@ export default function App() {
                   borderRadius: 6,
                 }}>
                   <div style={{ fontSize: 11, fontWeight: 700, color: '#03543f', textTransform: 'uppercase', marginBottom: '0.4rem' }}>
-                    Parsed Rule Preview
+                    Edit & Confirm Rule
                   </div>
-                  <div style={{ fontSize: 13, color: '#1f2937', lineHeight: '1.4', marginBottom: '0.8rem' }}>
-                    <strong>Scope:</strong> {parsedRule.scope.toUpperCase()}
-                    {parsedRule.scope !== 'cart' && <> · <strong>Applies To:</strong> {parsedRule.appliesTo}</>}
-                    <br />
-                    <strong>Type:</strong> {parsedRule.type === 'percentage' ? 'Percentage' : 'Flat'} · <strong>Value:</strong> {parsedRule.type === 'percentage' ? `${parsedRule.value}% off` : `Rs.${parsedRule.value} off`}
-                    <br />
-                    <strong>Stackable:</strong> {parsedRule.stackable ? 'Yes' : 'No'}
-                    {parsedRule.scope === 'cart' && <> · <strong>Min Cart Value:</strong> Rs.{parsedRule.minCartValue.toLocaleString('en-IN')}</>}
+
+                  {/* Originally parsed caption */}
+                  {originalParsedRule && (
+                    <div style={{ fontSize: 10, color: '#6b7280', marginBottom: '0.6rem', fontStyle: 'italic' }}>
+                      Originally parsed as: {originalParsedRule.scope}
+                      {originalParsedRule.scope !== 'cart' ? ` → ${originalParsedRule.appliesTo}` : ''}
+                      {' · '}{originalParsedRule.type === 'percentage' ? `${originalParsedRule.value}%` : `Rs.${originalParsedRule.value}`} off
+                      {' · '}{originalParsedRule.stackable ? 'stackable' : 'non-stackable'}
+                      {originalParsedRule.scope === 'cart' ? ` · min Rs.${originalParsedRule.minCartValue}` : ''}
+                    </div>
+                  )}
+
+                  {/* Editable form */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem 0.8rem', marginBottom: '0.7rem' }}>
+                    {/* Scope */}
+                    <div>
+                      <label style={{ fontSize: 11, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 2 }}>Scope</label>
+                      <select
+                        value={editFields.scope}
+                        onChange={(e) => handleEditField('scope', e.target.value)}
+                        style={{ width: '100%', padding: '0.35rem 0.4rem', fontSize: 12, borderRadius: 4, border: '1px solid #CECECE', background: '#fff' }}
+                      >
+                        <option value="brand">Brand</option>
+                        <option value="platform">Platform</option>
+                        <option value="cart">Cart</option>
+                      </select>
+                    </div>
+
+                    {/* Applies To */}
+                    <div style={{ opacity: editFields.scope === 'cart' ? 0.4 : 1 }}>
+                      <label style={{ fontSize: 11, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 2 }}>Applies To</label>
+                      <input
+                        type="text"
+                        value={editFields.scope === 'cart' ? '' : editFields.appliesTo}
+                        onChange={(e) => handleEditField('appliesTo', e.target.value)}
+                        disabled={editFields.scope === 'cart'}
+                        placeholder={editFields.scope === 'cart' ? 'N/A for cart scope' : 'e.g. Natura Casa'}
+                        style={{ width: '100%', padding: '0.35rem 0.4rem', fontSize: 12, borderRadius: 4, border: '1px solid #CECECE', boxSizing: 'border-box' }}
+                      />
+                    </div>
+
+                    {/* Type */}
+                    <div>
+                      <label style={{ fontSize: 11, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 2 }}>Type</label>
+                      <select
+                        value={editFields.type}
+                        onChange={(e) => handleEditField('type', e.target.value)}
+                        style={{ width: '100%', padding: '0.35rem 0.4rem', fontSize: 12, borderRadius: 4, border: '1px solid #CECECE', background: '#fff' }}
+                      >
+                        <option value="percentage">Percentage</option>
+                        <option value="flat">Flat</option>
+                      </select>
+                    </div>
+
+                    {/* Value */}
+                    <div>
+                      <label style={{ fontSize: 11, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 2 }}>Value</label>
+                      <input
+                        type="number"
+                        value={editFields.value}
+                        onChange={(e) => handleEditField('value', e.target.value)}
+                        min="0"
+                        step="any"
+                        style={{ width: '100%', padding: '0.35rem 0.4rem', fontSize: 12, borderRadius: 4, border: '1px solid #CECECE', boxSizing: 'border-box' }}
+                      />
+                    </div>
+
+                    {/* Stackable */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', paddingTop: '0.2rem' }}>
+                      <input
+                        type="checkbox"
+                        checked={editFields.stackable}
+                        onChange={(e) => handleEditField('stackable', e.target.checked)}
+                        id="nl-stackable-toggle"
+                        style={{ width: 16, height: 16, cursor: 'pointer' }}
+                      />
+                      <label htmlFor="nl-stackable-toggle" style={{ fontSize: 12, fontWeight: 600, color: '#374151', cursor: 'pointer' }}>Stackable</label>
+                    </div>
+
+                    {/* Min Cart Value — only for cart scope */}
+                    {editFields.scope === 'cart' && (
+                      <div>
+                        <label style={{ fontSize: 11, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 2 }}>Min Cart Value (Rs.)</label>
+                        <input
+                          type="number"
+                          value={editFields.minCartValue}
+                          onChange={(e) => handleEditField('minCartValue', e.target.value)}
+                          min="0"
+                          step="any"
+                          style={{ width: '100%', padding: '0.35rem 0.4rem', fontSize: 12, borderRadius: 4, border: '1px solid #CECECE', boxSizing: 'border-box' }}
+                        />
+                      </div>
+                    )}
                   </div>
+
+                  {/* Confirm validation error */}
+                  {confirmError && (
+                    <div style={{
+                      marginBottom: '0.6rem',
+                      padding: '0.5rem 0.7rem',
+                      background: '#fde8e8',
+                      color: '#9b1c1c',
+                      borderRadius: 4,
+                      fontSize: 12,
+                      borderLeft: '4px solid #f05252'
+                    }}>
+                      {confirmError}
+                    </div>
+                  )}
+
                   <div style={{ display: 'flex', gap: '0.5rem' }}>
                     <button
                       style={{
