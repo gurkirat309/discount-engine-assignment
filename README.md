@@ -2,7 +2,7 @@
 
 ## Live Demo
 - **Deployed URL:** https://discount-engine-assignment-seven.vercel.app/
-- **video walkthrough:** https://www.loom.com/share/9cba5f5b0ebf41cea75b109945b97ac2
+- **Loom Video walkthrough:** https://www.loom.com/share/9cba5f5b0ebf41cea75b109945b97ac2
 
 ## Run Locally (3 steps)
 1. ```bash
